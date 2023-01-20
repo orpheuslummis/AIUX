@@ -23,6 +23,7 @@ type Params struct {
 	MaxTokens        int
 	Temperature      float64
 	TimeLimitSeconds int
+	DividerLength    int
 }
 
 func NewParamsFromEnv() Params {
@@ -43,11 +44,23 @@ func NewParamsFromEnv() Params {
 	if p.Temperature == 0 {
 		p.Temperature = temperature
 	}
+	if p.Temperature < 0 || p.Temperature > 1 {
+		panic("TEMPERATURE must be between 0 and 1")
+	}
+	if p.DividerLength, _ = strconv.Atoi(os.Getenv("DIVIDER_LENGTH")); p.DividerLength == 0 {
+		p.DividerLength = 85 // would be better to get terminal width than hardcode
+	}
 	return p
 }
 
 func main() {
 	p := NewParamsFromEnv()
+
+	divider := "\n"
+	for i := 0; i < p.DividerLength; i++ {
+		divider += "-"
+	}
+	divider += "\n"
 
 	c := gogpt.NewClient(p.APIKey)
 	ctx := context.Background()
@@ -66,10 +79,10 @@ func main() {
 			return
 		}
 		for c := range resp.Choices {
-			fmt.Print("\n----------------------------------------------------------------------\n")
+			fmt.Print(divider)
 			fmt.Println(resp.Choices[c].Text)
 		}
-		fmt.Print("\n----------------------------------------------------------------------\n\n")
+		fmt.Println(divider)
 		prompt = promptUser()
 	}
 }
