@@ -1,4 +1,4 @@
-module orpheuslummis.info/gpttree-simple
+module github.com/orpheuslummis/gpttree-simple
 
 go 1.18
 
