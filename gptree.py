@@ -1,58 +1,36 @@
-from dataclasses import dataclass
+# how to change the color if the submitted text is different from the original text?
+# how to input api key as a modal 1st time?
+# save logging to file
+
+
 import hashlib
 import json
-import os
 import streamlit as st
 import openai
+from utils import RequestParams, new_logger, get_params_from_env, request
 
-# import numpy as np
-# import pandas as pd
-
-
-@dataclass
-class Params:
-    prompt: str
-    n: int
-    max_tokens: int
-    temperature: float
-
-
-def request(params: Params):
-    response = openai.Completion.create(
-        model="text-davinci-003",
-        # model="gpt-3.5-turbo", # when openai supports it ...
-        prompt=params.prompt,
-        temperature=params.temperature,
-        max_tokens=params.max_tokens,
-        n=params.n,
-    )
-    return response
-
-
-def get_params_from_env():
-    apikey = os.environ.get("OPENAI_API_KEY")
-    params = {
-        "apikey": apikey,
-    }
-    return params
+# defaults
+TEMPERATURE = 0.6
+MAX_TOKENS = 300
+N = 4
 
 
 def update_prompt():
-    params = Params(
+    params = RequestParams(
         prompt=st.session_state.prompt,
         n=st.session_state.n,
         max_tokens=st.session_state.max_tokens,
         temperature=st.session_state.temperature,
     )
-    with st.spinner("Wait for it..."):
-        data = request(params)
-        # st.write(hash_dict(data))
-        for i, t in enumerate(data.choices):
-            st.write(t.text)
-            if i < len(data.choices) - 1:
-                st.write(
-                    "–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––"
-                )
+    log.info(params)
+    with container_bottom:
+        with st.spinner("Wait for it..."):
+            results = request(params)
+            # st.write(hash_dict(data))
+            for i, r in enumerate(results):
+                st.markdown(r)
+                if i < len(results) - 1:
+                    st.write("–" * 100)
 
 
 def hash_dict(d):
@@ -62,23 +40,36 @@ def hash_dict(d):
 
 
 if __name__ == "__main__":
+    log = new_logger("gptree")
     params = get_params_from_env()
+    if params["apikey"] is None:
+        st.error("Please set OPENAI_API_KEY environment variable.")
     openai.api_key = params["apikey"]
 
     st.set_page_config(layout="wide")
+    container_top = st.container()
+    container_bottom = st.container()
 
-    st.text_area("Prompt", key="prompt", on_change=update_prompt)
-    st.slider(
-        "Temperature",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.9,
-        step=0.1,
-        key="temperature",
-    )
-    st.slider(
-        "Max Tokens", min_value=1, max_value=1000, value=100, step=1, key="max_tokens"
-    )
-    st.slider("N", min_value=1, max_value=10, value=5, step=1, key="n")
-    # st.text_area("Prompt", key="prompt", on_change=update_prompt)
-    # st.button("Update Prompt", on_click=update_prompt)
+    with container_top:
+        st.text_area("Prompt", key="prompt")
+        if st.button("Submit"):
+            update_prompt()
+
+        with st.expander("Advanced"):
+            st.slider(
+                "Temperature",
+                min_value=0.0,
+                max_value=1.0,
+                value=TEMPERATURE,
+                step=0.1,
+                key="temperature",
+            )
+            st.slider(
+                "Max Tokens",
+                min_value=1,
+                max_value=1000,
+                value=MAX_TOKENS,
+                step=1,
+                key="max_tokens",
+            )
+            st.slider("N", min_value=1, max_value=10, value=N, step=1, key="n")
