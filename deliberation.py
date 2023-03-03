@@ -1,6 +1,7 @@
 # TODO text doesn't disappear upon change
+# TODO proper logigng
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import openai
 import streamlit as st
 
@@ -23,6 +24,12 @@ class Pipeline:
 
     def run(self, _: Params):
         pass
+
+
+@dataclass
+class PipelineResults:
+    text: str
+    intermediate_text: list[str] = field(default_factory=list)
 
 
 class Dummy(Pipeline):
@@ -53,7 +60,7 @@ class Critic(Pipeline):
     }
 
     @staticmethod
-    def aggregate_results(results) -> str:
+    def aggregate(results) -> str:
         sep = "–––"
         joined_results = sep.join(results)
 
@@ -62,7 +69,7 @@ class Critic(Pipeline):
 
         {results}
 
-        Represent clearly the given criticism as bullet points.
+        Represent clearly the given criticism as bullet points, referring text for each.
         """
 
         p = aggregation_prompt.format(results=joined_results)
@@ -74,14 +81,13 @@ class Critic(Pipeline):
                 temperature=0.5,
             )
         )
-        print(f"DEBUG: {r}")
-        return r
+        return r[0]
 
-    def run(self, params: Params) -> str:
+    def run(self, params: Params) -> PipelineResults:
         results_from_critics = []
 
         for critic in self.critics:
-            prompt = critic.format(idea=params.prompt)
+            prompt = self.critics[critic].format(idea=params.prompt)
 
             r = request(
                 RequestParams(
@@ -91,23 +97,24 @@ class Critic(Pipeline):
                     temperature=self.default_temperature,
                 )
             )
-            for i, rr in enumerate(r):
-                log.debug(f"{critic} result {i}: {rr}")
             results_from_critics.extend(r)
 
-        aggregated_results = self.aggregate_results(results_from_critics)
-        log.info(f"aggregated_results: {aggregated_results}")
-        return aggregated_results
+        log.debug(f"{self.name}: results from critics: {results_from_critics}")
+        aggregated_results = self.aggregate(results_from_critics)
+        log.debug(f"{self.name}: aggregated results: {aggregated_results}")
+        return PipelineResults(
+            text=aggregated_results, intermediate_text=results_from_critics
+        )
 
 
-class PraisePipeline(Pipeline):
+class Praise(Pipeline):
     """
     Pipeline that comes up with various aspects to praise of a prompt, (expansion),
     then aggregates them into a short summary.
     """
 
     name = "praise"
-    default_n = 5
+    default_n = 4
     default_max_tokens = 100
     default_temperature = 0.9
 
@@ -137,34 +144,29 @@ class PraisePipeline(Pipeline):
                     temperature=self.default_temperature,
                 )
             )
-            for i, r in enumerate(results):
-                log.debug(f"result {i}: ???")
 
             results[k] = r
 
         aggregated_results = self.aggregate_results(results)
-        log.info(f"aggregated_results: {aggregated_results}")
-        return aggregated_results
+        return PipelineResults(text=aggregated_results)
 
     @staticmethod
     def aggregate_results(rd: dict[str, str]) -> str:
-        # preprocess results
-        # extract them from the dict and join them
-
-        rvalues = [rd[r] for r in rd]
-
-        sep = "–––\n"
-        joined_results = sep.join(rvalues)
+        sep = "\n–––\n"
+        agg = ""
+        for k in rd:
+            for v in rd[k]:
+                agg += v.strip() + sep
 
         aggregation_prompt = """
         The following are the many praises:
 
-        {results}
+        {praises}
 
         Represent clearly the given praises as bullet points.
         """
 
-        p = aggregation_prompt.format(results=joined_results)
+        p = aggregation_prompt.format(praises=agg)
         result = request(
             RequestParams(
                 prompt=p,
@@ -173,9 +175,13 @@ class PraisePipeline(Pipeline):
                 temperature=0.5,
             )
         )
-        # TODO extract text from response
-        print(f"DEBUG: {result}")
-        return result
+        return result[0]
+
+
+def flatten_and_join(v: list[list[str]]) -> str:
+    flattened = [item for sublist in v for item in sublist]
+    s = "\n–––\n".join(flattened)
+    return s
 
 
 class Improver(Pipeline):
@@ -184,12 +190,15 @@ class Improver(Pipeline):
     integrating the suggested improvements.
     """
 
+    name = "improver"
+
     pass
 
 
-def run_pipeline_set(pipelines: list[Pipeline], params: Params) -> dict:
+def run_pipeline_set(
+    pipelines: list[Pipeline], params: Params
+) -> dict[str, PipelineResults]:
     # TBD async
-    # TBD configurable set of pipelines to run
     results = {}
     for p in pipelines:
         results[p.name] = p.run(params)
@@ -200,11 +209,18 @@ def update_prompt():
     params = Params(
         prompt=st.session_state.prompt,
     )
+    log.debug(f"params: {params}")
+    pipelines = [all_pipelines[p] for p in st.session_state.pipelines]
     results = run_pipeline_set(pipelines, params)
 
     for pname in results:
-        st.header(pname)
-        st.markdown(results[pname].text)
+        container_bottom.header(pname)
+        if st.session_state.show_intermediate_outputs:
+            for r in results[pname].intermediate_text:
+                container_bottom.markdown("–––")
+                container_bottom.markdown(r)
+            container_bottom.markdown("–––")
+        container_bottom.markdown(results[pname].text)
 
 
 if __name__ == "__main__":
@@ -213,7 +229,7 @@ if __name__ == "__main__":
         st.error("Please set OPENAI_API_KEY environment variable.")
     openai.api_key = params["apikey"]
 
-    pipelines: list[Pipeline] = [Dummy(), Critic(), PraisePipeline()]
+    all_pipelines = {p.name: p for p in [Critic(), Praise(), Improver(), Dummy()]}
 
     container_top = st.container()
     container_bottom = st.container()
@@ -221,8 +237,14 @@ if __name__ == "__main__":
     with container_top:
         st.header("Deliberation system")
         st.text_area("Prompt", key="prompt")
+        st.multiselect(
+            "Select pipelines",
+            [p for p in all_pipelines],
+            key="pipelines",
+            default=["critic"],
+        )
         if st.button("Submit"):
             update_prompt()
 
         with st.expander("Advanced"):
-            st.write("TBD advanced parameters")
+            st.checkbox("Show intermediate outputs", key="show_intermediate_outputs")

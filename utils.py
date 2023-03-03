@@ -6,14 +6,21 @@ import openai
 
 
 def new_logger(name: str) -> logging.Logger:
-    log = logging.getLogger("my_logger")
-    log.setLevel(logging.INFO)
-    # current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log = logging.getLogger(name)
+    log.setLevel(logging.DEBUG)
+
     file_handler = logging.FileHandler(f"{name}.log")
     file_handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     file_handler.setFormatter(formatter)
     log.addHandler(file_handler)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(levelname)s - %(message)s")
+    stream_handler.setFormatter(formatter)
+    log.addHandler(stream_handler)
+
     return log
 
 
@@ -57,8 +64,7 @@ def request(params: RequestParams):
         print("timeout")
 
     results = []
-    # print(response)
-    for c in response["choices"]:
+    for c in response["choices"]:  # type: ignore
         text = c["message"]["content"]
         results.append(text)
     return results
